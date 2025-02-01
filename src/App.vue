@@ -1,7 +1,6 @@
 <script setup>
-import { GenAI, GenText } from './run.js';
+import { GenAI, GenText, model_type, LocalStorageManager } from './run.js';
 import { ref, onMounted } from 'vue';
-import { LocalStorageManager } from './storage.js';
 import {
   ElButton, ElInput, ElContainer, ElAside, ElHeader,
   ElMain, ElFooter, ElScrollbar, ElOption, ElSelect,
@@ -15,9 +14,14 @@ const showError = (text_obj) => ElNotification({ title: '错误', message: text_
 const showInfo = (text_obj) => ElNotification({ title: '信息', message: text_obj.toString(), type: 'info', duration: 1000 });
 const showWarning = (text_obj) => ElNotification({ title: '警告', message: text_obj.toString(), type: 'warning', duration: 2000 });
 const showSuccess = (text_obj) => ElNotification({ title: '成功', message: text_obj.toString(), type: 'success', duration: 1000 });
+window.showError = showError;
+window.showInfo = showInfo;
+window.showWarning = showWarning;
+window.showSuccess = showSuccess;
 let ls = new LocalStorageManager("gemini-chat");
 let input_value = ref('');
 let global_msg = [];
+let is_clear = false;
 let b_lock = ref(false);
 let b_mlock = ref(false);
 let el_box = ref();
@@ -26,7 +30,7 @@ let v_keys = null;
 let r_p = null;
 let v_sysmsg = ref('');
 let input_key = ref('');
-let go_bottom = ref(true);//自动下滑,TODO
+let go_bottom = ref(true);//自动下滑
 let drawer = ref(false);
 let v_target = null;
 let v_input_change = ref('');
@@ -38,20 +42,46 @@ const isCollapse = ref(true);
 let ai = null;
 let submit = null;
 const historys = ref([]);
+
 let options = ref([
   {
     value: 'gemini-2.0-flash-exp',
     label: 'Gemini 2.0 Flash',
   },
   {
-    value: 'gemini-1.5-pro-002',
-    label: 'Gemini 1.5 Pro 002',
+    value: 'gemini-2.0-flash-thinking-exp-01-21',
+    label: 'Gemini 2.0 Flash Thinking',
   },
   {
     value: 'gemini-exp-1206',
     label: 'Gemini 1206',
   },
+  {
+    value: "deepseek-r1:14b",
+    label: "ollama-deepseek-r1:14b-4k",
+  },
+  {
+    value: "deepseek-r1:7b",
+    label: "ollama-deepseek-r1:7b-44k",
+  },
+  {
+    value: "deepseek-reasoner",
+    label: "DeepSeek R1",
+  },
+  {
+    value: "deepseek-chat",
+    label: "DeepSeek V3",
+  },
 ]);
+let mtype = {
+  "gemini-2.0-flash-exp": model_type.gemini,
+  "gemini-2.0-flash-thinking-exp-01-21": model_type.gemini,
+  "gemini-exp-1206": model_type.gemini,
+  "deepseek-r1:14b": model_type.local,
+  "deepseek-r1:7b": model_type.local,
+  "deepseek-reasoner": model_type.deepseek,
+  "deepseek-chat": model_type.deepseek,
+};
 let select_model = ref(options.value[0].value);
 const text_type = ["&thinsp;&thinsp;User&thinsp;&thinsp;", "&thinsp;&thinsp;Model&thinsp;&thinsp;"];
 window.global_msg = global_msg;//DEL
@@ -135,32 +165,32 @@ function changeTarget(type) {//1类型,2删除,3文本
   }
   b_lock.value = false;
 }
-function changeTextType() {//TODO:bug fix->修改后会重新生成会报错
-  try {
-    b_lock.value = true;
-    if (v_target) {
-      if (!v_id) {
-        showWarning("首条类型不能为Model,必须是User.");
-        b_lock.value = false;
-        return;
-      }
-      v_target.childNodes[0].innerHTML = (v_target.childNodes[0].textContent[2] == "U" ? text_type[1] : text_type[0]);
-      if (v_target.childNodes[0].textContent[2] == "U") {
-        v_target.childNodes[0].style.backgroundColor = "rgb(88, 131, 88)";
-      } else {
-        v_target.childNodes[0].style.backgroundColor = "rgb(87, 104, 120)";
-      }
-      changeTarget(1);
-      showSuccess("设置成功.");
-    } else {
-      throw new Error("设置失败.");
-    }
-  } catch (e) {
-    console.log(e);
-    showError(e);
-  }
-  b_lock.value = false;
-}
+// function changeTextType() {//TODO:bug fix->修改后会重新生成会报错
+//   try {
+//     b_lock.value = true;
+//     if (v_target) {
+//       if (!v_id) {
+//         showWarning("首条类型不能为Model,必须是User.");
+//         b_lock.value = false;
+//         return;
+//       }
+//       v_target.childNodes[0].innerHTML = (v_target.childNodes[0].textContent[2] == "U" ? text_type[1] : text_type[0]);
+//       if (v_target.childNodes[0].textContent[2] == "U") {
+//         v_target.childNodes[0].style.backgroundColor = "rgb(88, 131, 88)";
+//       } else {
+//         v_target.childNodes[0].style.backgroundColor = "rgb(87, 104, 120)";
+//       }
+//       changeTarget(1);
+//       showSuccess("设置成功.");
+//     } else {
+//       throw new Error("设置失败.");
+//     }
+//   } catch (e) {
+//     console.log(e);
+//     showError(e);
+//   }
+//   b_lock.value = false;
+// }
 function deleteText() {
   try {
     b_lock.value = true;
@@ -212,14 +242,20 @@ function createTextBox(type) {
   }
 }
 function changeModel() {
-  if (ai) ai.setModel(select_model.value);
+  if (ai) {
+    // if (select_model.value.indexOf("deepseek") != -1) {
+    //   if (window.location.href.indexOf("localhost") != -1 && window.location.href.indexOf("127.0.0.1") != -1) {
+    //     showWarning("当前模型不可使用.");
+    //     return;
+    //   }
+    // }
+    ai.setModel(select_model.value, mtype[select_model.value]);
+  }
 }
 function gotoBottom() {
   try {
     if (go_bottom.value) el_box.value.setScrollTop(el_box.value.wrapRef.scrollHeight + 128);
   } catch (e) {
-    console.log(e);
-    showError(e);
   }
 }
 function paramChange() {
@@ -267,7 +303,7 @@ async function changeCollapse() {
 function key_init(vkey) {
   if (!vkey) return;
   try {
-    ai = new GenAI(select_model.value, vkey.value);
+    ai = new GenAI(select_model.value, mtype[select_model.value], vkey.value);
     ai.setParameters(v_params.value[0], v_params.value[1], v_params.value[2]);
     ai.setLimit(v_params.value[3]);
     ai.setCallBack(gotoBottom);
@@ -292,7 +328,7 @@ onMounted(() => {
     try {
       gotoBottom();
       if (!input_value.value) {
-        showError("请输入内容.");
+        //showError("请输入内容.");
         return;
       }
       b_lock.value = true;
@@ -307,6 +343,7 @@ onMounted(() => {
         html = unescapeHTML(html.replace(/^\s*<p>|<\/p>\s*$/g, ''));
         o.text_node.innerHTML = html;
         gotoBottom();
+        save_msg(false);
         b_lock.value = false;
       });
       ai.setProxy(gt);
@@ -339,7 +376,10 @@ function clear(test = false) {
     document.getElementById("el-msg-box").replaceChildren();
     global_msg = [];
     b_lock.value = false;
-    if (!test) showInfo("已清空消息.");
+    if (!test) {
+      showInfo("已清空消息.");
+      is_clear = true;
+    }
   } catch (e) {
     console.log(e);
     showError(e);
@@ -385,6 +425,7 @@ async function resend() {
       html = unescapeHTML(html.replace(/^\s*<p>|<\/p>\s*$/g, ''));
       o.text_node.innerHTML = html;
       gotoBottom();
+      save_msg(false);
       b_lock.value = false;
     });
     ai._proxy.text_node.innerHTML = "";
@@ -402,27 +443,30 @@ function generateID() {
 function getSaveName(id) {
   return `save-${id}`;
 }
-function extractSaveId(sid) {
-  return parseInt(sid.substring(5));
-}
-function packMessage(to_id) {//TODO
+function packMessage(to_id, is_save) {
   try {
-    if (v_uid) to_id = v_uid;
+    if (!is_save) {
+      if (v_uid) to_id = v_uid;
+      else v_uid = to_id;
+    } else {
+      v_uid = 0;
+    }
     let save_data = { sys_prompt: "", dialog: [], id: to_id };
     save_data.sys_prompt = v_sysmsg.value;
     save_data.dialog = ai.history;
+    console.log(ai.history);
     ls.save(getSaveName(to_id), save_data);
     for (let i = 0; i < historys.value.length; i++) {
       if (historys.value[i].id == to_id) return;
     }
-    historys.value.push({ id: to_id, name: "123" });//TODO
+    historys.value.push({ id: to_id, name: "new" });
     ls.save("save-historys", historys.value);
   } catch (e) {
     console.log(e);
     showError(e);
   }
 }
-function unpackMessage(pak) {//TODO
+function unpackMessage(pak) {
   try {
     b_lock.value = true;
     clear(true);
@@ -433,7 +477,9 @@ function unpackMessage(pak) {//TODO
     for (let i = 0; i < ai.history.length; ++i) {
       let refv = ai.history[i];
       let item = createTextBox(refv.role == "user" ? text_type[0] : text_type[1]);
-      item.childNodes[1].innerHTML = refv.parts[0].text;
+      let html = marked.parse(refv.parts[0].text);
+      html = unescapeHTML(html.replace(/^\s*<p>|<\/p>\s*$/g, ''));
+      item.childNodes[1].innerHTML = html;
       push_item(item);
     }
     b_lock.value = false;
@@ -442,16 +488,16 @@ function unpackMessage(pak) {//TODO
     showError(e);
   }
 }
-function save_msg() {
-  b_lock = true;
+function save_msg(cdt = true) {
+  b_lock.value = true;
   try {
-    packMessage(generateID());
+    packMessage(generateID(), cdt);
   } catch (e) {
     console.log(e);
     showError(e);
   }
-  b_lock = false;
-  showSuccess("保存成功!");
+  b_lock.value = false;
+  if (cdt) showSuccess("保存成功!");
 }
 async function loadHistory(t) {
   if (!ai) {
@@ -482,7 +528,23 @@ async function loadHistory(t) {
     showError(e);
   }
 }
-function deleteHistory(t) {//TODO
+function editName(t) {
+  let target = t.target.parentNode.parentNode.parentNode.parentNode;
+  let id = parseInt(target.childNodes[0].innerText);
+  let value = prompt("请输入新名称:", "default");
+  if (value) {
+    target.childNodes[1].innerText = value;
+  } else return;
+  for (let i = 0; i < historys.value.length; i++) {
+    if (historys.value[i].id == id) {
+      historys.value[i].name = value;
+      break;
+    }
+  }
+  ls.save("save-historys", historys.value);
+  showSuccess(`更改成功<${value}>!`);
+}
+function deleteHistory(t) {
   try {
     let target = t.target.parentNode.parentNode.parentNode.parentNode;
     let id = parseInt(target.childNodes[0].innerText);
@@ -506,8 +568,8 @@ function deleteHistory(t) {//TODO
     <el-drawer v-model="drawer" title="消息设置" :with-header="false" size="70%">
       <span id="edit-area">
         <div class="params-input">
-          <el-button style="width: 100%;" @click="changeTextType()" :disabled="true">改变消息类型</el-button>
-          <br>
+          <!-- <el-button style="width: 100%;" @click="changeTextType()" :disabled="true">改变消息类型</el-button>
+          <br> -->
           <el-button style="width: 100%;" @click="deleteText()">调整消息长度</el-button>
           <br>
           <br>
@@ -577,7 +639,8 @@ function deleteHistory(t) {//TODO
                   <el-table-column prop="name" label="名称" width="100" />
                   <el-table-column fixed="right" label="操作" min-width="100">
                     <template #default>
-                      <el-button link type="primary" size="small" @click="loadHistory">加载</el-button>
+                      <el-button link type="primary" size="default" @click="editName">重命名</el-button>
+                      <el-button link type="primary" size="default" @click="loadHistory">加载</el-button>
                       <el-button link type="primary" size="small" @click="deleteHistory">删除</el-button>
                     </template>
                   </el-table-column>
@@ -679,5 +742,9 @@ function deleteHistory(t) {//TODO
 .text-icon {
   transform: translateX(0);
   transition: transform 0.3s ease;
+}
+
+think {
+  color: lightgreen;
 }
 </style>

@@ -9,10 +9,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@rollup/rollup-win32-x64-msvc": "^4.32.1",
     "element-plus": "^2.8.8",
-    "highlight": "^0.2.4",
-    "highlight.js": "^11.10.0",
     "marked": "^15.0.2",
+    "ollama": "^0.5.12",
+    "openai": "^4.81.0",
     "vue": "^3.5.12"
   },
   "devDependencies": {

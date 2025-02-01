@@ -12,12 +12,64 @@
     }`, style.sheet.cssRules.length);
 })();
 import { GoogleGenerativeAI, HarmBlockThreshold, HarmCategory } from "./gemini.mjs";
+export class LocalStorageManager {
+    constructor(namespace = 'app') {
+        this.namespace = namespace;
+    }
+    save(key, value) {
+        if (typeof key !== 'string') throw new Error('Key must be a string.');
+        let stringifiedValue;
+        try {
+            stringifiedValue = JSON.stringify(value);
+        } catch (error) {
+            throw new Error(`Value could not be stringified: ${error.message}`);
+        }
+        localStorage.setItem(`${this.namespace}-${key}`, stringifiedValue);
+    }
+    read(key, defaultValue = null) {
+        if (typeof key !== 'string') throw new Error('Key must be a string.');
+        const value = localStorage.getItem(`${this.namespace}-${key}`);
+        if (value === null) return defaultValue;
+        try {
+            return JSON.parse(value);
+        } catch (error) {
+            console.error(`Error parsing JSON for key "${key}":`, error);
+            return null;
+        }
+    }
+    remove(key) {
+        if (typeof key !== 'string') {
+            throw new Error('Key must be a string.');
+        }
+        localStorage.removeItem(`${this.namespace}-${key}`);
+    }
+    clear() {
+        for (let key in localStorage) {
+            if (key.startsWith(`${this.namespace}-`)) {
+                localStorage.removeItem(key);
+            }
+        }
+    }
+}
 const SafeSetting = Object.values(HarmCategory).map((category) => ({
     category,
     threshold: HarmBlockThreshold.BLOCK_NONE,
 }));
+import { Ollama } from 'ollama/browser'
+import Openai from 'openai'
+function createOllama(url = "http://127.0.0.1:11434") {
+    return new Ollama({ host: url });
+}
+function createDeepSeek(url, key) {
+    return new Openai({ baseURL: url, apiKey: key, dangerouslyAllowBrowser: true });
+}
+export const model_type = {
+    gemini: 1,
+    deepseek: 2,
+    local: 3,
+};
 export class GenText {
-    constructor(toId, space = 20, initial = true) {
+    constructor(toId, space = 10, initial = true) {
         this.toId = toId;
         this.text_node = null;
         this.speed = space;
@@ -56,7 +108,7 @@ export class GenText {
         if (clear) this.text_node.innerText = "";
         for (let i = 0; i < text.length; i++) {
             this.text_node.innerText += text[i];
-            await this.sleep(this.speed);
+            if (this.speed) await this.sleep(this.speed);
         }
     }
     finish() {
@@ -68,14 +120,18 @@ export class GenText {
     }
 }
 export class GenAI {
-    constructor(model_name = "gemini-1.5-flash", key = [], sys_msg = "") {
+    constructor(model_name = "gemini-1.5-flash", type = model_type.gemini, key = [], sys_msg = "") {
         this.name = model_name;
         this.key = key;
+        this.type = type;
         this.models = [];
         this.itr = 0;
         this.limit = 0;
+        this.num_ctx = 4096;
         this.history = [];
         this.system = sys_msg;
+        this.local_url = `http://${window.location.hostname}:11434`;
+        this.deepseek_url = "https://api.deepseek.com";
         this._input = null;
         this._proxy = null;
         this._callback = null;
@@ -84,13 +140,20 @@ export class GenAI {
         if (!key) throw new Error("require key !");
         this.init();
     }
+    autoNumCtx() {
+        if (this.type == model_type.local) {
+            if (this.name.indexOf("7b") != -1) this.num_ctx = 45056;
+            else this.num_ctx = 4096;
+        }
+    }
     clear() {
         this.history = [];
         this._proxy = null;
         this._input = null;
     }
-    setModel(model_name) {
+    setModel(model_name, type) {
         this.name = model_name;
+        this.type = type;
         this.setSystemMessage("");
     }
     setParameters(temperature = 0.9, topP = 0.95, topK = 16) {
@@ -100,10 +163,16 @@ export class GenAI {
         this.limit = value;
     }
     roll() {
-        return this.itr = (this.itr + 1) % this.key.length;
+        return this.itr = (this.itr + 1) % this.models.length;
     }
     createMessage(role_type, msg) {//"user","model"
+        if (this.type != model_type.gemini && role_type == "model") {
+            if (msg.startsWith("<think>")) msg = msg.substring(msg.indexOf("</think>") + 10);//\n\n
+        }
         return { role: role_type, parts: [{ text: msg }] };
+    }
+    convertFormat(msg) {
+        return { role: msg.role == "model" ? "assistant" : "user", content: msg.parts[0].text };
     }
     setCallBack(callback_) {
         this._callback = callback_;
@@ -116,9 +185,22 @@ export class GenAI {
     getRollModel() {
         return this.models[this.roll()];
     }
-    init() {//"gemini-1.5-pro-002,gemini-exp-1121
-        for (let i = 0; i < this.key.length; ++i)
-            this.models.push((new GoogleGenerativeAI(this.key[i])).getGenerativeModel({ model: this.name, SafeSetting, systemInstruction: this.system }));
+    init() {
+        if (this.type == model_type.local) {
+            this.models.push(createOllama(this.local_url));
+        } else if (this.type == model_type.deepseek) {
+            for (let i = 0; i < this.key.length; i++) {
+                if (this.key[i].startsWith("sk-")) {
+                    this.models.push(createDeepSeek(this.deepseek_url, this.key[i]));
+                }
+            }
+        } else {
+            for (let i = 0; i < this.key.length; ++i) {
+                if (!this.key[i].startsWith("sk-")) {
+                    this.models.push((new GoogleGenerativeAI(this.key[i])).getGenerativeModel({ model: this.name, SafeSetting, systemInstruction: this.system }));
+                }
+            }
+        }
     }
     setInput(text) {
         this._input = text;
@@ -148,38 +230,90 @@ export class GenAI {
         this.popMessage();
         return await this.submit(proxy || this._proxy);
     }
+    async proxyHandle(chunkText) {
+        if (this._proxy) await this._proxy.appendText(chunkText);
+        else console.log(chunkText);
+        if (this._callback) this._callback(this);
+    }
+    check_model() {
+        if (this.models.length == 0) throw new Error("缺失的APIKEY.");
+    }
     async submit(proxy_gentext_object, only_model = false) {
-        let _history = this.history;
+        this.autoNumCtx();
+        let _history = this.history.slice();//浅拷贝
         if (this.limit > 0 && this.history.length > this.limit) _history = this.history.slice(this.history.length - this.limit, this.history.length);
+        if (this.type != model_type.gemini) {
+            let local_history = [];
+            local_history.push({ role: "system", content: this.system });
+            for (let i = 0; i < _history.length; i++) {
+                local_history.push(this.convertFormat(_history[i]));
+            }
+            local_history.push({ role: "user", content: this._input });
+            _history = local_history;
+        }
         this._proxy = proxy_gentext_object;
         this._proxy.show();
         let model = null;
         try {
-            model = this.getRollModel();
-            const chat = model.startChat({
-                history: _history,
-                generationConfig: {
-                    maxOutputTokens: this.max_out_token,
-                    temperature: this.param[0],
-                    topP: this.param[1],
-                    topK: this.param[2],
-                },
-            });
-            const result = await chat.sendMessageStream(this._input);
+            this.check_model();
             let text = '';
-            for await (const chunk of result.stream) {
-                const chunkText = chunk.text();
-                if (this._proxy) await this._proxy.appendText(chunkText);
-                else console.log(chunkText);
-                text += chunkText;
-                if (this._callback) this._callback(this);
+            if (this.type == model_type.local) {
+                model = this.models[0];
+                const stream = await model.chat({
+                    model: this.name,
+                    messages: _history,
+                    stream: true,
+                    options: {
+                        temperature: this.param[0],
+                        top_p: this.param[1],
+                        top_k: this.param[2],
+                        num_ctx: this.num_ctx,
+                    }
+                });
+                for await (const chunk of stream) {
+                    let content = chunk.message.content;
+                    await this.proxyHandle(content);
+                    text += content;
+                }
+            } else if (this.type == model_type.deepseek) {
+                model = this.getRollModel();
+                const stream = await model.chat.completions.create({
+                    model: this.name,
+                    messages: _history,
+                    stream: true,
+                    temperature: this.param[0],
+                    top_p: this.param[1],
+                    top_k: this.param[2],
+                });
+                for await (const chunk of stream) {
+                    let content = chunk.choices[0]?.delta?.content || '';
+                    await this.proxyHandle(content);
+                    text += content;
+                }
+            } else {
+                model = this.getRollModel();
+                const chat = model.startChat({//太恶毒了,会偷偷修改_history,所以用slice
+                    history: _history,
+                    generationConfig: {
+                        maxOutputTokens: this.max_out_token,
+                        temperature: this.param[0],
+                        topP: this.param[1],
+                        topK: this.param[2],
+                    },
+                });
+                const result = await chat.sendMessageStream(this._input);
+                for await (const chunk of result.stream) {
+                    let content = chunk.text();
+                    await this.proxyHandle(content);
+                    text += content;
+                }
             }
-            this._proxy.finish();
             if (!only_model) this.history.push(this.createMessage("user", this._input));
             this.history.push(this.createMessage("model", text));
+            if (this._proxy) this._proxy.finish();
         } catch (e) {
             console.log(model);
-            throw new Error(e);
+            if (window.showError) window.showError(e);
         }
         return true;
     }
@@ -193,10 +327,10 @@ export class GenAI {
         return await this.submit(this._proxy);
     }
 }
-export function createAI(model_name = "gemini-1.5-flash", key = [], sys_msg = "") {
-    return new GenAI(model_name, key, sys_msg);
+export function createAI(model_name = "gemini-1.5-flash", type = model_type.gemini, key = [], sys_msg = "") {
+    return new GenAI(model_name, type, key, sys_msg);
 }
 //example
-// let ai = createAI("gemini-1.5-flash",["API_KEY"])
+// let ai = createAI("gemini-1.5-flash",model_type.gemini,["API_KEY"])
 // ai.setProxy(new GenText("chat"));
 // ai.postMessage("Hello, world!");
