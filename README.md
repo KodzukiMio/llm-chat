@@ -1,6 +1,4 @@
-# gemini
-
-This template should help get you started developing with Vue 3 in Vite.
+# gemini chat
 
 ## Recommended IDE Setup
 
@@ -30,6 +28,9 @@ npm run build
 
 ## ps
 线上:http://47.120.15.113/gemini/index.html
+
 这个api key只支持从google官方渠道获取的.
+
 因此需要代理才能得到google服务器响应.
+
 存档功能还没做好
