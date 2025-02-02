@@ -29,5 +29,8 @@ npm run build
 ## ps
 线上:http://47.120.15.113/gemini/index.html
 
-apikey: deepseek和google的可以混合填写,用换行分隔每一个key
+apikey: 
+
+deepseek和google的可以混合填写,用换行分隔每一个key.
+
 Silicon的key用!开头
