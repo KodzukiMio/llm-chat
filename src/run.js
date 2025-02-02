@@ -67,9 +67,10 @@ export const model_type = {
     gemini: 1,
     deepseek: 2,
     local: 3,
+    other_ds: 4,
 };
 export class GenText {
-    constructor(toId, space = 10, initial = true) {
+    constructor(toId, space = 15, initial = true) {
         this.toId = toId;
         this.text_node = null;
         this.speed = space;
@@ -132,6 +133,7 @@ export class GenAI {
         this.system = sys_msg;
         this.local_url = `http://${window.location.hostname}:11434`;
         this.deepseek_url = "https://api.deepseek.com";
+        this.other_url = "https://api.siliconflow.cn/v1";      
         this._input = null;
         this._proxy = null;
         this._callback = null;
@@ -167,7 +169,7 @@ export class GenAI {
     }
     createMessage(role_type, msg) {//"user","model"
         if (this.type != model_type.gemini && role_type == "model") {
-            if (msg.startsWith("<think>")) msg = msg.substring(msg.indexOf("</think>") + 10);//\n\n
+            if (msg.startsWith("<think>")) msg = msg.substring(msg.lastIndexOf("</think>") + 10);//\n\n
         }
         return { role: role_type, parts: [{ text: msg }] };
     }
@@ -192,6 +194,12 @@ export class GenAI {
             for (let i = 0; i < this.key.length; i++) {
                 if (this.key[i].startsWith("sk-")) {
                     this.models.push(createDeepSeek(this.deepseek_url, this.key[i]));
+                };
+            }
+        } else if (this.type == model_type.other_ds) {
+            for (let i = 0; i < this.key.length; i++) {
+                if (this.key[i].startsWith("!sk-")) {//第三方用!开头
+                    this.models.push(createDeepSeek(this.other_url, this.key[i].substring(1)));
                 }
             }
         } else {
@@ -275,7 +283,7 @@ export class GenAI {
                     await this.proxyHandle(content);
                     text += content;
                 }
-            } else if (this.type == model_type.deepseek) {
+            } else if (this.type == model_type.deepseek || this.type == model_type.other_ds) {
                 model = this.getRollModel();
                 const stream = await model.chat.completions.create({
                     model: this.name,

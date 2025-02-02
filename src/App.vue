@@ -72,6 +72,10 @@ let options = ref([
     value: "deepseek-chat",
     label: "DeepSeek V3",
   },
+  {
+    value: "deepseek-ai/DeepSeek-R1",
+    label: "DeepSeek R1 (Silicon)",
+  },
 ]);
 let mtype = {
   "gemini-2.0-flash-exp": model_type.gemini,
@@ -81,6 +85,7 @@ let mtype = {
   "deepseek-r1:7b": model_type.local,
   "deepseek-reasoner": model_type.deepseek,
   "deepseek-chat": model_type.deepseek,
+  "deepseek-ai/DeepSeek-R1": model_type.other_ds,
 };
 let select_model = ref(options.value[0].value);
 const text_type = ["&thinsp;&thinsp;User&thinsp;&thinsp;", "&thinsp;&thinsp;Model&thinsp;&thinsp;"];
@@ -454,7 +459,7 @@ function packMessage(to_id, is_save) {
     let save_data = { sys_prompt: "", dialog: [], id: to_id };
     save_data.sys_prompt = v_sysmsg.value;
     save_data.dialog = ai.history;
-    console.log(ai.history);
+    //console.log(ai.history);
     ls.save(getSaveName(to_id), save_data);
     for (let i = 0; i < historys.value.length; i++) {
       if (historys.value[i].id == to_id) return;
@@ -615,7 +620,7 @@ function deleteHistory(t) {
                     <br>
                     <div class="params-input">
                       <el-input v-model="input_key" style="width: 240px;" :rows="3" type="textarea"
-                        @change="keysChange()" placeholder="请输入密钥,多个密钥行间隔" />
+                        @change="keysChange()" placeholder="请输入密钥,多个密钥行间隔,第三方DeepSeek密钥用!开头" />
                     </div>
                     <br>
                   </span>
