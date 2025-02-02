@@ -70,7 +70,7 @@ export const model_type = {
     other_ds: 4,
 };
 export class GenText {
-    constructor(toId, space = 15, initial = true) {
+    constructor(toId, space = 10, initial = true) {
         this.toId = toId;
         this.text_node = null;
         this.speed = space;
@@ -133,7 +133,7 @@ export class GenAI {
         this.system = sys_msg;
         this.local_url = `http://${window.location.hostname}:11434`;
         this.deepseek_url = "https://api.deepseek.com";
-        this.other_url = "https://api.siliconflow.cn/v1";      
+        this.other_url = "https://api.siliconflow.cn/v1";
         this._input = null;
         this._proxy = null;
         this._callback = null;
@@ -204,7 +204,7 @@ export class GenAI {
             }
         } else {
             for (let i = 0; i < this.key.length; ++i) {
-                if (!this.key[i].startsWith("sk-")) {
+                if (!this.key[i].startsWith("sk-") && !this.key[i].startsWith("!sk-")) {
                     this.models.push((new GoogleGenerativeAI(this.key[i])).getGenerativeModel({ model: this.name, SafeSetting, systemInstruction: this.system }));
                 }
             }
