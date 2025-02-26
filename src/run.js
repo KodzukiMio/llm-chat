@@ -68,6 +68,7 @@ export const model_type = {
     deepseek: 2,
     local: 3,
     other_ds: 4,
+    ohmygpt: 5,
 };
 export class GenText {
     constructor(toId, space = 10, initial = true) {
@@ -75,6 +76,7 @@ export class GenText {
         this.text_node = null;
         this.speed = space;
         this.line = null;
+        this.think_node = null;
         this.callback = null;
         if (initial) this.init();
     }
@@ -95,12 +97,15 @@ export class GenText {
     }
     init() {
         this.text_node = document.createElement("span");
+        this.think_node = document.createElement("think");
         //this.text_node.contentEditable = "true";
+        document.getElementById(this.toId).appendChild(this.think_node);
+        document.getElementById(this.toId).appendChild(document.createElement("br"));
         document.getElementById(this.toId).appendChild(this.text_node);
         this.line = this.createLine();
         this.line.hidden = true;
         document.getElementById(this.toId).appendChild(this.line);
-        this.text_node.innerText = "";
+        this.clear();
     }
     appendTextNoDelay(text) {
         this.text_node.innerText += text;
@@ -111,6 +116,17 @@ export class GenText {
             this.text_node.innerText += text[i];
             if (this.speed) await this.sleep(this.speed);
         }
+    }
+    async appendThinkText(text, clear = false) {
+        if (clear) this.think_node.innerText = "";
+        for (let i = 0; i < text.length; i++) {
+            this.think_node.innerText += text[i];
+            if (this.speed) await this.sleep(this.speed);
+        }
+    }
+    clear() {
+        this.text_node.innerText = "";
+        if (this.think_node) this.think_node.innerText = "";
     }
     finish() {
         this.line.hidden = true;
@@ -134,6 +150,7 @@ export class GenAI {
         this.local_url = `http://${window.location.hostname}:11434`;
         this.deepseek_url = "https://api.deepseek.com";
         this.other_url = "https://api.siliconflow.cn/v1";
+        this.ohmygpt_url = "https://api.ohmygpt.com";
         this._input = null;
         this._proxy = null;
         this._callback = null;
@@ -202,6 +219,12 @@ export class GenAI {
                     this.models.push(createDeepSeek(this.other_url, this.key[i].substring(1)));
                 }
             }
+        } else if (this.type == model_type.ohmygpt) {
+            for (let i = 0; i < this.key.length; i++) {
+                if (this.key[i].startsWith("#sk-")) {//ohmygpt
+                    this.models.push(createDeepSeek(this.ohmygpt_url, this.key[i].substring(1)));
+                }
+            }
         } else {
             for (let i = 0; i < this.key.length; ++i) {
                 if (!this.key[i].startsWith("sk-") && !this.key[i].startsWith("!sk-")) {
@@ -238,9 +261,12 @@ export class GenAI {
         this.popMessage();
         return await this.submit(proxy || this._proxy);
     }
-    async proxyHandle(chunkText) {
-        if (this._proxy) await this._proxy.appendText(chunkText);
-        else console.log(chunkText);
+    async proxyHandle(chunkText, reasoning_content = "") {
+        if (this._proxy) {
+            await this._proxy.appendThinkText(reasoning_content);
+            await this._proxy.appendText(chunkText);
+        }
+        else console.log(chunkText, reasoning_content);
         if (this._callback) this._callback(this);
     }
     check_model() {
@@ -260,7 +286,7 @@ export class GenAI {
             _history = local_history;
         }
         this._proxy = proxy_gentext_object;
-        this._proxy.show();
+        if (this._proxy) this._proxy.show();
         let model = null;
         try {
             this.check_model();
@@ -283,7 +309,7 @@ export class GenAI {
                     await this.proxyHandle(content);
                     text += content;
                 }
-            } else if (this.type == model_type.deepseek || this.type == model_type.other_ds) {
+            } else if (this.type == model_type.deepseek || this.type == model_type.other_ds || this.type == model_type.ohmygpt) {
                 model = this.getRollModel();
                 const stream = await model.chat.completions.create({
                     model: this.name,
@@ -294,8 +320,9 @@ export class GenAI {
                     top_k: this.param[2],
                 });
                 for await (const chunk of stream) {
+                    let reasoning_content = chunk.choices[0]?.delta?.reasoning_content || '';
                     let content = chunk.choices[0]?.delta?.content || '';
-                    await this.proxyHandle(content);
+                    await this.proxyHandle(content, reasoning_content);
                     text += content;
                 }
             } else {
