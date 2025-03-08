@@ -69,6 +69,7 @@ export const model_type = {
     local: 3,
     other_ds: 4,
     ohmygpt: 5,
+    aliyun: 6,
 };
 export class GenText {
     constructor(toId, space = 10, initial = true) {
@@ -151,6 +152,7 @@ export class GenAI {
         this.deepseek_url = "https://api.deepseek.com";
         this.other_url = "https://api.siliconflow.cn/v1";
         this.ohmygpt_url = "https://api.ohmygpt.com";
+        this.aliyun_url = "https://dashscope.aliyuncs.com/compatible-mode/v1";
         this._input = null;
         this._proxy = null;
         this._callback = null;
@@ -223,6 +225,12 @@ export class GenAI {
             for (let i = 0; i < this.key.length; i++) {
                 if (this.key[i].startsWith("#sk-")) {//ohmygpt
                     this.models.push(createDeepSeek(this.ohmygpt_url, this.key[i].substring(1)));
+                }
+            }
+        } else if (this.type == model_type.aliyun) {
+            for (let i = 0; i < this.key.length; i++) {
+                if (this.key[i].startsWith("$sk-")) {//阿里云
+                    this.models.push(createDeepSeek(this.aliyun_url, this.key[i].substring(1)));
                 }
             }
         } else {
@@ -309,7 +317,7 @@ export class GenAI {
                     await this.proxyHandle(content);
                     text += content;
                 }
-            } else if (this.type == model_type.deepseek || this.type == model_type.other_ds || this.type == model_type.ohmygpt) {
+            } else if (this.type == model_type.deepseek || this.type == model_type.other_ds || this.type == model_type.ohmygpt || this.type == model_type.aliyun) {
                 model = this.getRollModel();
                 const stream = await model.chat.completions.create({
                     model: this.name,

@@ -77,10 +77,10 @@ let options = ref([
     value: "deepseek-ai/DeepSeek-R1",
     label: "DeepSeek R1 (Silicon)",
   },
-  // {
-  //   value: "deepseek-r1",
-  //   label: "DeepSeek R1 (Tencent)",
-  // }
+  {
+    value: "qwq-32b",
+    label: "QwQ-32B",
+  }
 ]);
 let mtype = {
   "gemini-2.0-flash-exp": model_type.gemini,
@@ -91,7 +91,7 @@ let mtype = {
   "deepseek-reasoner": model_type.deepseek,
   "deepseek-chat": model_type.deepseek,
   "deepseek-ai/DeepSeek-R1": model_type.other_ds,
-  //"deepseek-r1": model_type.tencent,
+  "qwq-32b": model_type.aliyun,
 };
 let select_model = ref(options.value[0].value);
 const text_type = ["&thinsp;&thinsp;User&thinsp;&thinsp;", "&thinsp;&thinsp;Model&thinsp;&thinsp;"];
@@ -144,7 +144,7 @@ function showEdit(obj) {
     if (b_lock.value) return;
     v_target = obj.srcElement.parentNode;
     console.log(v_target.childNodes[1].childNodes[2]);
-    v_input_change.value = v_target.childNodes[1].childNodes[2]?.textContent||v_target.childNodes[1].textContent;
+    v_input_change.value = v_target.childNodes[1].childNodes[2]?.textContent || v_target.childNodes[1].textContent;
     v_sid = v_target.childNodes[1].id;
     v_id = parseInt(v_sid.substring(6));
     drawer.value = true;
@@ -226,7 +226,7 @@ function deleteText() {
 function applyTextChange() {
   try {
     b_lock.value = true;
-    if(v_target.childNodes[1].childNodes[2])v_target.childNodes[1].childNodes[2].innerText = v_input_change.value;
+    if (v_target.childNodes[1].childNodes[2]) v_target.childNodes[1].childNodes[2].innerText = v_input_change.value;
     else v_target.childNodes[1].innerText = v_input_change.value;
     changeTarget(3);
     showInfo("更改成功!");
@@ -629,7 +629,7 @@ function deleteHistory(t) {
                     <br>
                     <div class="params-input">
                       <el-input v-model="input_key" style="width: 240px;" :rows="3" type="textarea"
-                        @change="keysChange()" placeholder="请输入密钥,多个密钥行间隔,第三方DeepSeek密钥用!开头,ohmygpt的用#开头" />
+                        @change="keysChange()" placeholder="请输入密钥,多个密钥行间隔,第三方DeepSeek密钥用!开头,ohmygpt的用#开头,阿里云用$开头" />
                     </div>
                     <br>
                   </span>
