@@ -51,7 +51,7 @@ let submit = null;
 const historys = ref([]);
 window.GenAI = GenAI;
 window.model_type = model_type;
-const base_model = [
+const base_models = [
   {
     value: 'gemini-2.5-pro-preview-05-06',
     label: 'Gemini 2.5 Pro 0506',
@@ -73,7 +73,7 @@ const base_model = [
     label: "DeepSeek R1",
   }
 ];
-let options = ref([...base_model]);
+let options = ref([...base_models]);
 let mtype = {
   "gemini-2.5-flash-preview-05-20": model_type.gemini,
   "gemini-2.5-pro-preview-05-06": model_type.gemini,
@@ -83,8 +83,8 @@ let mtype = {
 };
 let select_model = ref(options.value[0].value);
 const text_type = ["&thinsp;&thinsp;User&thinsp;&thinsp;", "&thinsp;&thinsp;Model&thinsp;&thinsp;"];
-window.global_msg = global_msg;//DEL
-window.ls = ls;//DEL
+//window.global_msg = global_msg;//DEL
+//window.ls = ls;//DEL
 //----------------------------------------------------------------
 if (r_p = ls.read("params")) v_params = ref(r_p);
 else v_params = ref([0.9, 0.95, 16, 0]);
@@ -134,6 +134,17 @@ try {
 } catch (e) {
   console.log(e);
   showError(e);
+}
+function reloadOptions(optarr) {
+  options.value = [...base_models];
+  optarr.forEach((v) => {
+    if (v != '') {
+      options.value.push({
+        value: '@' + v,
+        label: '@' + v
+      });
+    }
+  });
 }
 function push_item(obj) {
   global_msg.push(obj);
@@ -244,13 +255,12 @@ function createTextBox(type) {
 }
 function changeModel() {
   if (ai) {
-    // if (select_model.value.indexOf("deepseek") != -1) {
-    //   if (window.location.href.indexOf("localhost") != -1 && window.location.href.indexOf("127.0.0.1") != -1) {
-    //     showWarning("当前模型不可使用.");
-    //     return;
-    //   }
-    // }
-    ai.setModel(select_model.value, mtype[select_model.value]);
+    const type = mtype[select_model.value];
+    if (type == null) {
+      ai.setModel(select_model.value.substring(1), model_type.custom);
+    } else {
+      ai.setModel(select_model.value, type);
+    }
   }
 }
 function getScrollValue() {
@@ -322,6 +332,7 @@ function key_init(vkey, mode = true) {
   if (!vkey) return;
   try {
     if (mode) setNewKeys(false);
+    setupCustomModels();
     ai = new GenAI(select_model.value, mtype[select_model.value], vkey.value);
     ai.custom_url = v_cs_url.value;
     ai.setParameters(v_params.value[0], v_params.value[1], v_params.value[2]);
@@ -340,12 +351,17 @@ function setSysMsg() {
   }
   ai.setSystemMessage(v_sysmsg.value);
 }
-function setNewModel(mode = true) {//TODO
+function setupCustomModels() {
+  reloadOptions(v_cs_model.value.split(','));
+}
+function setNewModel() {
   if (!ai) {
     showWarning("GenAI对象不存在");
     return;
   }
-
+  ls.save("v_cs_model", v_cs_model.value);
+  setupCustomModels();
+  showSuccess("模型设置成功");
 }
 function setNewUrl() {
   ls.save("v_cs_url", v_cs_url.value);

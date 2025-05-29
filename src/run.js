@@ -337,7 +337,7 @@ export class GenAI {
                     await this.proxyHandle(content);
                     text += content;
                 }
-            } else if (this.type == model_type.deepseek || this.type == model_type.other_ds || this.type == model_type.ohmygpt || this.type == model_type.aliyun || this.type == model_type.openrouter) {
+            } else if (this.type == model_type.custom || this.type == model_type.deepseek || this.type == model_type.other_ds || this.type == model_type.ohmygpt || this.type == model_type.aliyun || this.type == model_type.openrouter) {
                 model = this.getRollModel();
                 const stream = await model.chat.completions.create({
                     model: this.name,

@@ -1,4 +1,4 @@
-# gemini chat
+# llm chat
 
 ## Recommended IDE Setup
 
@@ -27,7 +27,7 @@ npm run build
 ```
 
 ## ps
-线上:http://47.120.15.113/gemini/index.html
+线上:http://47.120.15.113/llm/index.html
 
 apikey: 
 
