@@ -31,6 +31,7 @@ let r_p = null;
 let v_sysmsg = ref('');
 let next_line = true;
 let last_line = 0;
+
 let v_cs_url = ref('');
 let v_cs_model = ref('');
 let v_cs_key = ref('');
@@ -107,7 +108,33 @@ try {
   console.log(e);
   showError(e);
 };
-
+try {
+  let value = null;
+  try {
+    value = ls.read("v_cs_key");
+  } catch (e) {
+    ls.save("v_cs_key", null);
+    throw e;
+  }
+  v_cs_key.value = value ? value : "";
+  try {
+    value = ls.read("v_cs_model");
+  } catch (e) {
+    ls.save("v_cs_model", null);
+    throw e;
+  }
+  v_cs_model.value = value ? value : "";
+  try {
+    value = ls.read("v_cs_url");
+  } catch (e) {
+    ls.save("v_cs_url", null);
+    throw e;
+  }
+  v_cs_url.value = value ? value : "";
+} catch (e) {
+  console.log(e);
+  showError(e);
+}
 function push_item(obj) {
   global_msg.push(obj);
   document.getElementById("el-msg-box").appendChild(obj);
@@ -245,15 +272,20 @@ function paramChange() {
     showError(e);
   }
 }
-function keysChange() {
+function keysChange(varr = null, mode = true) {
   try {
     let key = input_key.value;
     let keys = key.split('\n');
+    ls.save("keys", keys);
+    if (varr) {
+      varr.forEach((v) => {
+        if (v != '') keys.push('@' + v);
+      })
+    }
     if (v_keys) v_keys.value = keys;
     else v_keys = ref(keys);
-    ls.save("keys", keys);
-    key_init(v_keys);
-    showSuccess("密钥更改成功!");
+    key_init(v_keys, false);
+    if (mode) showSuccess("密钥更改成功!");
     setSysMsg();
   } catch (e) {
     showWarning(e);
@@ -286,9 +318,10 @@ function nextLine() {
   else last_line = val;
   if (next_line) gotoBottom();
 }
-function key_init(vkey) {
+function key_init(vkey, mode = true) {
   if (!vkey) return;
   try {
+    if (mode) setNewKeys(false);
     ai = new GenAI(select_model.value, mtype[select_model.value], vkey.value);
     ai.custom_url = v_cs_url.value;
     ai.setParameters(v_params.value[0], v_params.value[1], v_params.value[2]);
@@ -301,28 +334,45 @@ function key_init(vkey) {
   }
 }
 function setSysMsg() {
-  if (!ai) return;
+  if (!ai) {
+    showWarning("GenAI对象不存在");
+    return;
+  }
   ai.setSystemMessage(v_sysmsg.value);
 }
-function setNewModel() {//TODO
-  if (!ai) return;
+function setNewModel(mode = true) {//TODO
+  if (!ai) {
+    showWarning("GenAI对象不存在");
+    return;
+  }
 
 }
 function setNewUrl() {
-
+  ls.save("v_cs_url", v_cs_url.value);
+  ai.custom_url = v_cs_url.value;
+  showSuccess("接口地址更改成功");
+}
+function setNewKeys(mode = true) {
+  if (mode) ls.save("v_cs_key", v_cs_key.value);
+  keysChange(v_cs_key.value.split('\n'), mode);
 }
 function setCustom(type) {
   if (!ai) return;
-  switch (type) {
-    case 1://url
-      setNewUrl();
-      break;
-    case 2://model
-      setNewModel();
-      break;
-    case 3://keys
-      keysChange();
-      break;
+  try {
+    switch (type) {
+      case 1://url
+        setNewUrl();
+        break;
+      case 2://model
+        setNewModel();
+        break;
+      case 3://keys
+        setNewKeys();
+        break;
+    }
+  } catch (e) {
+    console.error(e);
+    showError(e);
   }
 }
 onMounted(() => {
@@ -655,7 +705,7 @@ function deleteHistory(t) {
                   <template #title><span>自定义模型</span></template>
                   <div class="params-input">
                     <el-input v-model="v_cs_url" style="width: 240px" :rows="1" type="textarea" @change="setCustom(1)"
-                      placeholder="接口地址" />
+                      placeholder="接口地址-OpenAI格式" />
                   </div>
                   <br>
                   <div class="params-input">
@@ -665,7 +715,7 @@ function deleteHistory(t) {
                   <br>
                   <div class="params-input">
                     <el-input v-model="v_cs_key" style="width: 240px" :rows="3" type="textarea" @change="setCustom(3)"
-                      placeholder="密钥" />
+                      placeholder="密钥-按行隔开" />
                   </div>
                 </el-menu-item-group>
               </el-sub-menu>
