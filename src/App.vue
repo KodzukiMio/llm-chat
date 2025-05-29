@@ -29,6 +29,12 @@ let v_params = null;//temperature,top-p,top-k,limit
 let v_keys = null;
 let r_p = null;
 let v_sysmsg = ref('');
+let next_line = true;
+let last_line = 0;
+let v_cs_url = ref('');
+let v_cs_model = ref('');
+let v_cs_key = ref('');
+
 let input_key = ref('');
 let go_bottom = ref(true);//自动下滑
 let drawer = ref(false);
@@ -44,54 +50,35 @@ let submit = null;
 const historys = ref([]);
 window.GenAI = GenAI;
 window.model_type = model_type;
-let options = ref([
+const base_model = [
   {
-    value: 'gemini-2.0-flash-exp',
-    label: 'Gemini 2.0 Flash',
+    value: 'gemini-2.5-pro-preview-05-06',
+    label: 'Gemini 2.5 Pro 0506',
   },
   {
-    value: 'gemini-2.0-flash-thinking-exp-01-21',
-    label: 'Gemini 2.0 Flash Thinking',
+    value: 'gemini-2.5-flash-preview-05-20',
+    label: 'Gemini 2.5 Flash 0520',
   },
   {
-    value: 'gemini-2.0-pro-exp-02-05',
-    label: 'Gemini 2.0 Pro',
-  },
-  {
-    value: "deepseek-r1:14b",
-    label: "ollama-deepseek-r1:14b-4k",
-  },
-  {
-    value: "deepseek-r1:7b",
-    label: "ollama-deepseek-r1:7b-44k",
-  },
-  {
-    value: "deepseek-reasoner",
-    label: "DeepSeek R1",
+    value: "gemma3:27b",
+    label: "Local Gemma3-27b",
   },
   {
     value: "deepseek-chat",
     label: "DeepSeek V3",
   },
   {
-    value: "deepseek-ai/DeepSeek-R1",
-    label: "DeepSeek R1 (Silicon)",
-  },
-  {
-    value: "qwq-32b",
-    label: "QwQ-32B",
+    value: "deepseek-reasoner",
+    label: "DeepSeek R1",
   }
-]);
+];
+let options = ref([...base_model]);
 let mtype = {
-  "gemini-2.0-flash-exp": model_type.gemini,
-  "gemini-2.0-flash-thinking-exp-01-21": model_type.gemini,
-  "gemini-2.0-pro-exp-02-05": model_type.gemini,
-  "deepseek-r1:14b": model_type.local,
-  "deepseek-r1:7b": model_type.local,
-  "deepseek-reasoner": model_type.deepseek,
+  "gemini-2.5-flash-preview-05-20": model_type.gemini,
+  "gemini-2.5-pro-preview-05-06": model_type.gemini,
   "deepseek-chat": model_type.deepseek,
-  "deepseek-ai/DeepSeek-R1": model_type.other_ds,
-  "qwq-32b": model_type.aliyun,
+  "deepseek-reasoner": model_type.deepseek,
+  "gemma3:27b": model_type.local,
 };
 let select_model = ref(options.value[0].value);
 const text_type = ["&thinsp;&thinsp;User&thinsp;&thinsp;", "&thinsp;&thinsp;Model&thinsp;&thinsp;"];
@@ -143,9 +130,9 @@ function showEdit(obj) {
   try {
     if (b_lock.value) return;
     v_target = obj.srcElement.parentNode;
-    console.log(v_target.childNodes[1].childNodes[2]);
-    v_input_change.value = v_target.childNodes[1].childNodes[2]?.textContent || v_target.childNodes[1].textContent;
-    v_sid = v_target.childNodes[1].id;
+    const target = v_target.childNodes[1];
+    v_input_change.value = (target.children[0] && target.children[0].nodeName == "THINK" ? target.childNodes[2]?.textContent || target.textContent : target.textContent).replace("\n", "<br>");
+    v_sid = target.id;
     v_id = parseInt(v_sid.substring(6));
     drawer.value = true;
   } catch (e) {
@@ -177,32 +164,6 @@ function changeTarget(type) {//1类型,2删除,3文本
   }
   b_lock.value = false;
 }
-// function changeTextType() {//TODO:bug fix->修改后会重新生成会报错
-//   try {
-//     b_lock.value = true;
-//     if (v_target) {
-//       if (!v_id) {
-//         showWarning("首条类型不能为Model,必须是User.");
-//         b_lock.value = false;
-//         return;
-//       }
-//       v_target.childNodes[0].innerHTML = (v_target.childNodes[0].textContent[2] == "U" ? text_type[1] : text_type[0]);
-//       if (v_target.childNodes[0].textContent[2] == "U") {
-//         v_target.childNodes[0].style.backgroundColor = "rgb(88, 131, 88)";
-//       } else {
-//         v_target.childNodes[0].style.backgroundColor = "rgb(87, 104, 120)";
-//       }
-//       changeTarget(1);
-//       showSuccess("设置成功.");
-//     } else {
-//       throw new Error("设置失败.");
-//     }
-//   } catch (e) {
-//     console.log(e);
-//     showError(e);
-//   }
-//   b_lock.value = false;
-// }
 function deleteText() {
   try {
     b_lock.value = true;
@@ -265,6 +226,9 @@ function changeModel() {
     ai.setModel(select_model.value, mtype[select_model.value]);
   }
 }
+function getScrollValue() {
+  return el_box.value.wrapRef.scrollTop;
+}
 function gotoBottom() {
   try {
     if (go_bottom.value) el_box.value.setScrollTop(el_box.value.wrapRef.scrollHeight + 128);
@@ -313,13 +277,23 @@ async function changeCollapse() {
     isCollapse.value = !isCollapse.value;
   }
 }
+
+function nextLine() {
+  if (!next_line) return;
+  const val = getScrollValue();
+  last_line = last_line ? last_line : val;
+  if (last_line > val) next_line = false;//如果用户不想自动下滑
+  else last_line = val;
+  if (next_line) gotoBottom();
+}
 function key_init(vkey) {
   if (!vkey) return;
   try {
     ai = new GenAI(select_model.value, mtype[select_model.value], vkey.value);
+    ai.custom_url = v_cs_url.value;
     ai.setParameters(v_params.value[0], v_params.value[1], v_params.value[2]);
     ai.setLimit(v_params.value[3]);
-    ai.setCallBack(gotoBottom);
+    ai.setCallBack(nextLine, pop_item);
     window.ai = ai;//DEL
   } catch (e) {
     console.log(e);
@@ -330,6 +304,27 @@ function setSysMsg() {
   if (!ai) return;
   ai.setSystemMessage(v_sysmsg.value);
 }
+function setNewModel() {//TODO
+  if (!ai) return;
+
+}
+function setNewUrl() {
+
+}
+function setCustom(type) {
+  if (!ai) return;
+  switch (type) {
+    case 1://url
+      setNewUrl();
+      break;
+    case 2://model
+      setNewModel();
+      break;
+    case 3://keys
+      keysChange();
+      break;
+  }
+}
 onMounted(() => {
   isMobile.value = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(navigator.userAgent || navigator.vendor || window.opera);
   key_init(v_keys);
@@ -338,12 +333,19 @@ onMounted(() => {
       showWarning("请设置密钥.");
       return;
     }
+    if (ai && ai.type == model_type.local) {
+      if (window.location.href.indexOf("localhost") == -1) {
+        showError("不可使用本地模型.");
+        return;
+      }
+    }
     try {
       gotoBottom();
       if (!input_value.value) {
         //showError("请输入内容.");
         return;
       }
+      next_line = true;
       b_lock.value = true;
       let newelm = createTextBox(text_type[0]);
       newelm.childNodes[1].innerText = input_value.value;
@@ -355,7 +357,7 @@ onMounted(() => {
         let html = marked.parse(o.text_node.innerHTML);
         html = unescapeHTML(html.replace(/^\s*<p>|<\/p>\s*$/g, ''));
         o.text_node.innerHTML = html;
-        gotoBottom();
+        if (next_line) gotoBottom();
         save_msg(false);
         b_lock.value = false;
       });
@@ -414,6 +416,7 @@ async function resend() {
     }
     b_lock.value = true;
     gotoBottom();
+    next_line = true;
     let to_set = null;
     let first_user = false;
     if (ai.history[ai.history.length - 1].role == "user") {
@@ -438,7 +441,7 @@ async function resend() {
       let html = marked.parse(o.text_node.innerHTML);
       html = unescapeHTML(html.replace(/^\s*<p>|<\/p>\s*$/g, ''));
       o.text_node.innerHTML = html;
-      gotoBottom();
+      if (next_line) gotoBottom();
       save_msg(false);
       b_lock.value = false;
     });
@@ -647,6 +650,26 @@ function deleteHistory(t) {
                 </el-menu-item-group>
               </el-sub-menu>
               <el-sub-menu index="3">
+                <template #title>自定</template>
+                <el-menu-item-group>
+                  <template #title><span>自定义模型</span></template>
+                  <div class="params-input">
+                    <el-input v-model="v_cs_url" style="width: 240px" :rows="1" type="textarea" @change="setCustom(1)"
+                      placeholder="接口地址" />
+                  </div>
+                  <br>
+                  <div class="params-input">
+                    <el-input v-model="v_cs_model" style="width: 240px" :rows="1" type="textarea" @change="setCustom(2)"
+                      placeholder="模型名-逗号隔开" />
+                  </div>
+                  <br>
+                  <div class="params-input">
+                    <el-input v-model="v_cs_key" style="width: 240px" :rows="3" type="textarea" @change="setCustom(3)"
+                      placeholder="密钥" />
+                  </div>
+                </el-menu-item-group>
+              </el-sub-menu>
+              <el-sub-menu index="4">
                 <template #title>历史</template>
                 <el-table :data="historys" style="width: 100%">
                   <el-table-column fixed prop="id" label="ID" width="100" />

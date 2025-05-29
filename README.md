@@ -32,5 +32,3 @@ npm run build
 apikey: 
 
 deepseek和google的可以混合填写,用换行分隔每一个key.
-
-Silicon的key用!开头

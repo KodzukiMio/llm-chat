@@ -70,6 +70,8 @@ export const model_type = {
     other_ds: 4,
     ohmygpt: 5,
     aliyun: 6,
+    openrouter: 7,
+    custom: 8,
 };
 export class GenText {
     constructor(toId, space = 10, initial = true) {
@@ -138,7 +140,7 @@ export class GenText {
     }
 }
 export class GenAI {
-    constructor(model_name = "gemini-1.5-flash", type = model_type.gemini, key = [], sys_msg = "") {
+    constructor(model_name = "gemini-1.5-pro", type = model_type.gemini, key = [], sys_msg = "") {
         this.name = model_name;
         this.key = key;
         this.type = type;
@@ -153,18 +155,20 @@ export class GenAI {
         this.other_url = "https://api.siliconflow.cn/v1";
         this.ohmygpt_url = "https://api.ohmygpt.com";
         this.aliyun_url = "https://dashscope.aliyuncs.com/compatible-mode/v1";
+        this.openrouter_url = "https://openrouter.ai/api/v1";
+        this.custom_url = "";
         this._input = null;
         this._proxy = null;
         this._callback = null;
+        this._err_callback = null;
         this.max_out_token = 8192;
         this.param = [0.9, 0.95, 16];//temperature,top p,top k;
         if (!key) throw new Error("require key !");
         this.init();
     }
-    autoNumCtx() {
+    autoNumCtx(numctx = 4096) {
         if (this.type == model_type.local) {
-            if (this.name.indexOf("7b") != -1) this.num_ctx = 45056;
-            else this.num_ctx = 4096;
+            this.num_ctx = numctx;
         }
     }
     clear() {
@@ -195,8 +199,9 @@ export class GenAI {
     convertFormat(msg) {
         return { role: msg.role == "model" ? "assistant" : "user", content: msg.parts[0].text };
     }
-    setCallBack(callback_) {
+    setCallBack(callback_, errback_) {
         this._callback = callback_;
+        this._err_callback = errback_;
     }
     setSystemMessage(text) {
         this.system = text;
@@ -231,6 +236,18 @@ export class GenAI {
             for (let i = 0; i < this.key.length; i++) {
                 if (this.key[i].startsWith("$sk-")) {//阿里云
                     this.models.push(createDeepSeek(this.aliyun_url, this.key[i].substring(1)));
+                }
+            }
+        } else if (this.type == model_type.openrouter) {
+            for (let i = 0; i < this.key.length; i++) {
+                if (this.key[i].startsWith("sk-or")) {//openrouter
+                    this.models.push(createDeepSeek(this.openrouter_url, this.key[i]));
+                }
+            }
+        } else if (this.type == model_type.custom) {
+            for (let i = 0; i < this.key.length; i++) {
+                if (this.key[i].startsWith("@sk")) {//custom
+                    this.models.push(createDeepSeek(this.custom_url, this.key[i].substring(1)));
                 }
             }
         } else {
@@ -286,6 +303,8 @@ export class GenAI {
         if (this.limit > 0 && this.history.length > this.limit) _history = this.history.slice(this.history.length - this.limit, this.history.length);
         if (this.type != model_type.gemini) {
             let local_history = [];
+            // if (this.name.indexOf("gemma") != -1) local_history.push({ role: "assistant", content: this.system });
+            // else
             local_history.push({ role: "system", content: this.system });
             for (let i = 0; i < _history.length; i++) {
                 local_history.push(this.convertFormat(_history[i]));
@@ -296,6 +315,7 @@ export class GenAI {
         this._proxy = proxy_gentext_object;
         if (this._proxy) this._proxy.show();
         let model = null;
+        let has_push = false;
         try {
             this.check_model();
             let text = '';
@@ -317,7 +337,7 @@ export class GenAI {
                     await this.proxyHandle(content);
                     text += content;
                 }
-            } else if (this.type == model_type.deepseek || this.type == model_type.other_ds || this.type == model_type.ohmygpt || this.type == model_type.aliyun) {
+            } else if (this.type == model_type.deepseek || this.type == model_type.other_ds || this.type == model_type.ohmygpt || this.type == model_type.aliyun || this.type == model_type.openrouter) {
                 model = this.getRollModel();
                 const stream = await model.chat.completions.create({
                     model: this.name,
@@ -351,13 +371,19 @@ export class GenAI {
                     text += content;
                 }
             }
-            if (!only_model) this.history.push(this.createMessage("user", this._input));
+            if (!only_model) {
+                has_push = true;
+                this.history.push(this.createMessage("user", this._input));
+            }
             this.history.push(this.createMessage("model", text));
-            if (this._proxy) this._proxy.finish();
         } catch (e) {
+            if (!has_push) this.history.push(this.createMessage("user", this._input));
+            if (this._err_callback) this._err_callback(this);
             console.log(model);
             if (window.showError) window.showError(e);
+
         }
+        if (this._proxy) this._proxy.finish();
         return true;
     }
     setProxy(proxy) {
