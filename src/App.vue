@@ -44,6 +44,8 @@ let v_input_change = ref('');
 let v_id = null;
 let v_sid = null;
 let v_uid = 0;
+let v_abort = ref(false);
+let v_abort_value = ref(false);
 const isMobile = ref(false);
 const isCollapse = ref(true);
 let ai = null;
@@ -53,16 +55,16 @@ window.GenAI = GenAI;
 window.model_type = model_type;
 const base_models = [
   {
-    value: 'gemini-2.5-pro-preview-05-06',
-    label: 'Gemini 2.5 Pro 0506',
+    value: 'gemini-2.5-pro',
+    label: 'Gemini 2.5 Pro',
   },
   {
-    value: 'gemini-2.5-flash-preview-05-20',
-    label: 'Gemini 2.5 Flash 0520',
+    value: 'gemini-2.5-flash',
+    label: 'Gemini 2.5 Flash',
   },
   {
-    value: "gemma3:27b",
-    label: "Local Gemma3-27b",
+    value: "gemini-2.5-flash-lite-preview-06-17",
+    label: "Gemini 2.5 Flash Lite",
   },
   {
     value: "deepseek-chat",
@@ -75,11 +77,13 @@ const base_models = [
 ];
 let options = ref([...base_models]);
 let mtype = {
-  "gemini-2.5-flash-preview-05-20": model_type.gemini,
-  "gemini-2.5-pro-preview-05-06": model_type.gemini,
+  "gemini-2.5-flash": model_type.gemini,
+  "gemini-2.5-pro": model_type.gemini,
   "deepseek-chat": model_type.deepseek,
   "deepseek-reasoner": model_type.deepseek,
   "gemma3:27b": model_type.local,
+  "deepseek-r1:8b": model_type.local,
+  "gemini-2.5-flash-lite-preview-06-17": model_type.gemini,
 };
 let select_model = ref(options.value[0].value);
 const text_type = ["&thinsp;&thinsp;User&thinsp;&thinsp;", "&thinsp;&thinsp;Model&thinsp;&thinsp;"];
@@ -87,7 +91,7 @@ const text_type = ["&thinsp;&thinsp;User&thinsp;&thinsp;", "&thinsp;&thinsp;Mode
 //window.ls = ls;//DEL
 //----------------------------------------------------------------
 if (r_p = ls.read("params")) v_params = ref(r_p);
-else v_params = ref([0.9, 0.95, 16, 0]);
+else v_params = ref([0.9, 0.6, 16, 0]);
 try {
   if (r_p = ls.read("keys")) {
     v_keys = ref(r_p);
@@ -333,7 +337,7 @@ function key_init(vkey, mode = true) {
   try {
     if (mode) setNewKeys(false);
     setupCustomModels();
-    ai = new GenAI(select_model.value, mtype[select_model.value], vkey.value);
+    ai = new GenAI(select_model.value, mtype[select_model.value], vkey.value, "", v_abort_value);
     ai.custom_url = v_cs_url.value;
     ai.setParameters(v_params.value[0], v_params.value[1], v_params.value[2]);
     ai.setLimit(v_params.value[3]);
@@ -350,6 +354,7 @@ function setSysMsg() {
     return;
   }
   ai.setSystemMessage(v_sysmsg.value);
+  save_msg(false);
 }
 function setupCustomModels() {
   reloadOptions(v_cs_model.value.split(','));
@@ -426,8 +431,10 @@ onMounted(() => {
         if (next_line) gotoBottom();
         save_msg(false);
         b_lock.value = false;
+        v_abort.value = false;
       });
       ai.setProxy(gt);
+      v_abort.value = true;
       ai.postMessage(input_value.value);
       input_value.value = "";
     } catch (e) {
@@ -476,8 +483,22 @@ async function resend() {
       showWarning("消息不存在.");
       return;
     }
-    if (!ai._proxy) {//TODO:bug fix
-      showWarning("请至少新发送一条消息.");
+    if (!ai._proxy) {
+      let message = "";
+      if (ai.history.length < 3) {
+        message = ai.history[0].parts[0].text;
+        clear(true);
+      } else {
+        if (ai.history[ai.history.length - 1].role == "user") {
+          v_id = ai.history.length - 2;
+        } else {
+          v_id = ai.history.length - 3;
+        }
+        message = ai.history[v_id + 1].parts[0].text;
+        changeTarget(2);
+      }
+      input_value.value = message;
+      submit();
       return;
     }
     b_lock.value = true;
@@ -498,20 +519,24 @@ async function resend() {
       gt.think_node = last.childNodes[1].childNodes[0];
       gt.text_node = last.childNodes[1].childNodes[2];
       gt.line = last.childNodes[1].childNodes[3];
-      gt.line.hidden = true;
+      if (gt.line) gt.line.hidden = true;
       to_set = gt;
       ai.setInput(ai.history[ai.history.length - 2].parts[0].text);
     }
     ai.setProxy(to_set);
     to_set.setCallBack((o) => {
-      let html = marked.parse(o.text_node.innerHTML);
-      html = unescapeHTML(html.replace(/^\s*<p>|<\/p>\s*$/g, ''));
-      o.text_node.innerHTML = html;
+      if (o.text_node && o.text_node.innerHTML) {
+        let html = marked.parse(o.text_node.innerHTML);
+        html = unescapeHTML(html.replace(/^\s*<p>|<\/p>\s*$/g, ''));
+        o.text_node.innerHTML = html;
+      }
       if (next_line) gotoBottom();
       save_msg(false);
       b_lock.value = false;
+      v_abort.value = false;
     });
     ai._proxy.clear();
+    v_abort.value = true;
     ai.reSubmit(null, first_user);
   } catch (e) {
     console.log(e);
@@ -534,10 +559,7 @@ function packMessage(to_id, is_save) {
     } else {
       v_uid = 0;
     }
-    let save_data = { sys_prompt: "", dialog: [], id: to_id };
-    save_data.sys_prompt = v_sysmsg.value;
-    save_data.dialog = ai.history;
-    //console.log(ai.history);
+    let save_data = { sys_prompt: v_sysmsg.value, dialog: ai.history, id: to_id, select: select_model.value };
     ls.save(getSaveName(to_id), save_data);
     for (let i = 0; i < historys.value.length; i++) {
       if (historys.value[i].id == to_id) return;
@@ -565,6 +587,8 @@ function unpackMessage(pak) {
       item.childNodes[1].innerHTML = html;
       push_item(item);
     }
+    select_model.value = pak.select;
+    changeModel();
     b_lock.value = false;
   } catch (e) {
     console.log(e);
@@ -572,6 +596,7 @@ function unpackMessage(pak) {
   }
 }
 function save_msg(cdt = true) {
+  if (ai.history.length == 0 && ai.system == "") return;
   b_lock.value = true;
   try {
     packMessage(generateID(), cdt);
@@ -595,7 +620,13 @@ async function loadHistory(t) {
     id = parseInt(target.childNodes[0].innerText);
     name = target.childNodes[1].innerText;
     let pak = ls.read(getSaveName(id));
+    let count = 0;
     if (!pak) {
+      if (count < 3) {
+        count++;
+        await sleep(500);
+        return loadHistory(t);
+      }
       showError("此存档不存在!");
       return;
     }
@@ -604,7 +635,7 @@ async function loadHistory(t) {
     v_target = null;
     v_id = null;
     v_sid = null;
-    showSuccess(`成功加载<${name}>!`);
+    showSuccess(`成功加载 ${name} !`);
     b_lock.value = false;
   } catch (e) {
     console.log(e);
@@ -625,7 +656,7 @@ function editName(t) {
     }
   }
   ls.save("save-historys", historys.value);
-  showSuccess(`更改成功<${value}>!`);
+  showSuccess(`更改成功 ${value} !`);
 }
 function deleteHistory(t) {
   try {
@@ -644,6 +675,9 @@ function deleteHistory(t) {
     console.log(e);
     showError(e);
   }
+}
+function setInterrupt() {
+  v_abort_value.value = true;
 }
 </script>
 <template>
@@ -698,7 +732,7 @@ function deleteHistory(t) {
                     <br>
                     <div class="params-input">
                       <el-input v-model="input_key" style="width: 240px;" :rows="3" type="textarea"
-                        @change="keysChange()" placeholder="请输入密钥,多个密钥行间隔,第三方DeepSeek密钥用!开头,ohmygpt的用#开头,阿里云用$开头" />
+                        @change="keysChange()" placeholder="请输入密钥,多个密钥行间隔" />
                     </div>
                     <br>
                   </span>
@@ -775,7 +809,9 @@ function deleteHistory(t) {
                   v-if="!b_mlock"></el-input>
                 <span style="width: 10%;">
                   <el-button id="send" style="position:relative; width: 5%;left:12px; font-size: 140%;"
-                    :disabled="b_lock || b_mlock" v-on:click="submit">✦</el-button>
+                    :disabled="b_lock || b_mlock" v-on:click="submit" v-if="!v_abort">✦</el-button>
+                  <el-button id="abort" style="position:relative; width: 5%;left:12px; font-size: 140%;"
+                    v-on:click="setInterrupt" v-if="v_abort">🟥</el-button>
                   <el-button id="resend" style="width: 5%;font-size: 140%;" :disabled="b_lock || b_mlock"
                     v-if="!b_mlock" v-on:click="resend">⟳</el-button>
                   <el-button id="clear" style="width: 5%;font-size: 140%;" :disabled="b_lock || b_mlock" v-if="!b_mlock"

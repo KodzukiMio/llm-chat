@@ -128,19 +128,23 @@ export class GenText {
         }
     }
     clear() {
+        if (!this.text_node) {
+            this.text_node = this.think_node;
+            this.think_node = null;
+        }
         this.text_node.innerText = "";
         if (this.think_node) this.think_node.innerText = "";
     }
     finish() {
-        this.line.hidden = true;
+        if (this.line) this.line.hidden = true;
         if (this.callback) this.callback(this);
     }
     show() {
-        this.line.hidden = false;
+        if (this.line) this.line.hidden = false;
     }
 }
 export class GenAI {
-    constructor(model_name = "gemini-1.5-pro", type = model_type.gemini, key = [], sys_msg = "") {
+    constructor(model_name = "gemini-1.5-pro", type = model_type.gemini, key = [], sys_msg = "", outer_interrupt_signal = null) {
         this.name = model_name;
         this.key = key;
         this.type = type;
@@ -163,12 +167,18 @@ export class GenAI {
         this._err_callback = null;
         this.max_out_token = 8192;
         this.param = [0.9, 0.95, 16];//temperature,top p,top k;
+        this.interrupt_signal = outer_interrupt_signal;
         if (!key) throw new Error("require key !");
         this.init();
+    }
+    abort() {
+        if (this.interrupt_signal) this.interrupt_signal.value = true;
+        else this.interrupt_signal = { value: true };
     }
     autoNumCtx(numctx = 4096) {
         if (this.type == model_type.local) {
             this.num_ctx = numctx;
+            if (this.name.indexOf("8b") != -1) this.num_ctx = 20 * 1024;
         }
     }
     clear() {
@@ -179,7 +189,7 @@ export class GenAI {
     setModel(model_name, type) {
         this.name = model_name;
         this.type = type;
-        this.setSystemMessage("");
+        this.setSystemMessage(this.system);
     }
     setParameters(temperature = 0.9, topP = 0.95, topK = 16) {
         this.param = [temperature, topP, topK];
@@ -303,8 +313,6 @@ export class GenAI {
         if (this.limit > 0 && this.history.length > this.limit) _history = this.history.slice(this.history.length - this.limit, this.history.length);
         if (this.type != model_type.gemini) {
             let local_history = [];
-            // if (this.name.indexOf("gemma") != -1) local_history.push({ role: "assistant", content: this.system });
-            // else
             local_history.push({ role: "system", content: this.system });
             for (let i = 0; i < _history.length; i++) {
                 local_history.push(this.convertFormat(_history[i]));
@@ -333,6 +341,10 @@ export class GenAI {
                     }
                 });
                 for await (const chunk of stream) {
+                    if (this.interrupt_signal && this.interrupt_signal.value) {
+                        this.interrupt_signal.value = false;
+                        break;
+                    }
                     let content = chunk.message.content;
                     await this.proxyHandle(content);
                     text += content;
@@ -348,6 +360,10 @@ export class GenAI {
                     top_k: this.param[2],
                 });
                 for await (const chunk of stream) {
+                    if (this.interrupt_signal && this.interrupt_signal.value) {
+                        this.interrupt_signal.value = false;
+                        break;
+                    }
                     let reasoning_content = chunk.choices[0]?.delta?.reasoning_content || '';
                     let content = chunk.choices[0]?.delta?.content || '';
                     await this.proxyHandle(content, reasoning_content);
@@ -366,6 +382,10 @@ export class GenAI {
                 });
                 const result = await chat.sendMessageStream(this._input);
                 for await (const chunk of result.stream) {
+                    if (this.interrupt_signal && this.interrupt_signal.value) {
+                        this.interrupt_signal.value = false;
+                        break;
+                    }
                     let content = chunk.text();
                     await this.proxyHandle(content);
                     text += content;
@@ -379,7 +399,7 @@ export class GenAI {
         } catch (e) {
             if (!has_push) this.history.push(this.createMessage("user", this._input));
             if (this._err_callback) this._err_callback(this);
-            console.log(model);
+            console.log(this);
             if (window.showError) window.showError(e);
 
         }
@@ -400,6 +420,6 @@ export function createAI(model_name = "gemini-1.5-flash", type = model_type.gemi
     return new GenAI(model_name, type, key, sys_msg);
 }
 //example
-// let ai = createAI("gemini-1.5-flash",model_type.gemini,["API_KEY"])
+// let ai = createAI("gemini-2.5-flash",model_type.gemini,["API_KEY"])
 // ai.setProxy(new GenText("chat"));
 // ai.postMessage("Hello, world!");
