@@ -168,12 +168,18 @@ export class GenAI {
         this.max_out_token = 8192;
         this.param = [0.9, 0.95, 16];//temperature,top p,top k;
         this.interrupt_signal = outer_interrupt_signal;
+        this.controller = null;
+        this._usage_callback = null;
         if (!key) throw new Error("require key !");
         this.init();
+    }
+    setUsageCallback(callback_) {
+        this._usage_callback = callback_;
     }
     abort() {
         if (this.interrupt_signal) this.interrupt_signal.value = true;
         else this.interrupt_signal = { value: true };
+        if (this.controller) this.controller.abort();
     }
     autoNumCtx(numctx = 4096) {
         if (this.type == model_type.local) {
@@ -262,7 +268,7 @@ export class GenAI {
             }
         } else {
             for (let i = 0; i < this.key.length; ++i) {
-                if (!this.key[i].startsWith("sk-") && !this.key[i].startsWith("!sk-")) {
+                if (this.key[i].indexOf("sk-") == -1) {
                     this.models.push((new GoogleGenerativeAI(this.key[i])).getGenerativeModel({ model: this.name, SafeSetting, systemInstruction: this.system }));
                 }
             }
@@ -309,7 +315,8 @@ export class GenAI {
     }
     async submit(proxy_gentext_object, only_model = false) {
         this.autoNumCtx();
-        let _history = this.history.slice();//浅拷贝
+        if (this.interrupt_signal) this.interrupt_signal.value = false;
+        let _history = this.history.slice();
         if (this.limit > 0 && this.history.length > this.limit) _history = this.history.slice(this.history.length - this.limit, this.history.length);
         if (this.type != model_type.gemini) {
             let local_history = [];
@@ -324,9 +331,10 @@ export class GenAI {
         if (this._proxy) this._proxy.show();
         let model = null;
         let has_push = false;
+        let text = '';
         try {
             this.check_model();
-            let text = '';
+            this.controller = new AbortController();
             if (this.type == model_type.local) {
                 model = this.models[0];
                 const stream = await model.chat({
@@ -341,6 +349,9 @@ export class GenAI {
                     }
                 });
                 for await (const chunk of stream) {
+                    if (chunk.usage && this._usage_callback) {
+                        this._usage_callback(chunk.usage);
+                    }
                     if (this.interrupt_signal && this.interrupt_signal.value) {
                         this.interrupt_signal.value = false;
                         break;
@@ -358,8 +369,12 @@ export class GenAI {
                     temperature: this.param[0],
                     top_p: this.param[1],
                     top_k: this.param[2],
-                });
+                }, { signal: this.controller.signal });
+
                 for await (const chunk of stream) {
+                    if (chunk.usage && this._usage_callback) {
+                        this._usage_callback(chunk.usage);
+                    }
                     if (this.interrupt_signal && this.interrupt_signal.value) {
                         this.interrupt_signal.value = false;
                         break;
@@ -382,6 +397,9 @@ export class GenAI {
                 });
                 const result = await chat.sendMessageStream(this._input);
                 for await (const chunk of result.stream) {
+                    if (chunk.usage && this._usage_callback) {
+                        this._usage_callback(chunk.usage);
+                    }
                     if (this.interrupt_signal && this.interrupt_signal.value) {
                         this.interrupt_signal.value = false;
                         break;
@@ -397,11 +415,15 @@ export class GenAI {
             }
             this.history.push(this.createMessage("model", text));
         } catch (e) {
-            if (!has_push) this.history.push(this.createMessage("user", this._input));
-            if (this._err_callback) this._err_callback(this);
-            console.log(this);
-            if (window.showError) window.showError(e);
-
+            if (e.name === 'AbortError' || e.message.includes('aborted')) {
+                if (!has_push) this.history.push(this.createMessage("user", this._input));
+                this.history.push(this.createMessage("model", text));
+            } else {
+                if (!has_push) this.history.push(this.createMessage("user", this._input));
+                if (this._err_callback) this._err_callback(this);
+                console.log(this);
+                if (window.showError) window.showError(e);
+            }
         }
         if (this._proxy) this._proxy.finish();
         return true;

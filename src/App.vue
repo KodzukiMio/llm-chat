@@ -31,7 +31,7 @@ let r_p = null;
 let v_sysmsg = ref('');
 let next_line = true;
 let last_line = 0;
-
+let total_tokens = ref(0);
 let v_cs_url = ref('');
 let v_cs_model = ref('');
 let v_cs_key = ref('');
@@ -55,35 +55,24 @@ window.GenAI = GenAI;
 window.model_type = model_type;
 const base_models = [
   {
-    value: 'gemini-2.5-pro',
-    label: 'Gemini 2.5 Pro',
-  },
-  {
     value: 'gemini-2.5-flash',
     label: 'Gemini 2.5 Flash',
   },
   {
-    value: "gemini-2.5-flash-lite-preview-06-17",
-    label: "Gemini 2.5 Flash Lite",
-  },
-  {
     value: "deepseek-chat",
-    label: "DeepSeek V3",
+    label: "DeepSeek Chat",
   },
   {
     value: "deepseek-reasoner",
-    label: "DeepSeek R1",
+    label: "DeepSeek Reasoner",
   }
 ];
 let options = ref([...base_models]);
 let mtype = {
   "gemini-2.5-flash": model_type.gemini,
-  "gemini-2.5-pro": model_type.gemini,
   "deepseek-chat": model_type.deepseek,
   "deepseek-reasoner": model_type.deepseek,
   "gemma3:27b": model_type.local,
-  "deepseek-r1:8b": model_type.local,
-  "gemini-2.5-flash-lite-preview-06-17": model_type.gemini,
 };
 let select_model = ref(options.value[0].value);
 const text_type = ["&thinsp;&thinsp;User&thinsp;&thinsp;", "&thinsp;&thinsp;Model&thinsp;&thinsp;"];
@@ -98,7 +87,7 @@ try {
     input_key.value = v_keys.value[0];
     for (let i = 1; i < v_keys.value.length; i++)input_key.value += `\n${v_keys.value[i]}`;
   }
-  else showWarning("请设置密钥.");
+  else if (!ls.read("v_cs_key")) showWarning("请设置密钥.");
   try {
     historys.value = ls.read("save-historys");
     if (!historys.value) historys.value = [];
@@ -139,6 +128,9 @@ try {
   console.log(e);
   showError(e);
 }
+function mark(text) {
+  return marked.parse(marked.parse(text));
+}
 function reloadOptions(optarr) {
   options.value = [...base_models];
   optarr.forEach((v) => {
@@ -173,9 +165,10 @@ function showEdit(obj) {
     if (b_lock.value) return;
     v_target = obj.srcElement.parentNode;
     const target = v_target.childNodes[1];
-    v_input_change.value = (target.children[0] && target.children[0].nodeName == "THINK" ? target.childNodes[2]?.textContent || target.textContent : target.textContent).replace("\n", "<br>");
+    //v_input_change.value = (target.children[0] && target.children[0].nodeName == "THINK" ? target.childNodes[2]?.textContent || target.textContent : target.textContent).replace("\n", "<br>");
     v_sid = target.id;
     v_id = parseInt(v_sid.substring(6));
+    v_input_change.value = ai.history[v_id].parts[0].text;
     drawer.value = true;
   } catch (e) {
     console.log(e);
@@ -200,6 +193,7 @@ function changeTarget(type) {//1类型,2删除,3文本
         ai.history[v_id].parts[0].text = v_input_change.value;
         break;
     }
+    save_msg(false);
   } catch (e) {
     console.log(e);
     showError(e);
@@ -229,8 +223,13 @@ function deleteText() {
 function applyTextChange() {
   try {
     b_lock.value = true;
-    if (v_target.childNodes[1].childNodes[2]) v_target.childNodes[1].childNodes[2].innerText = v_input_change.value;
-    else v_target.childNodes[1].innerText = v_input_change.value;
+    const text = mark(v_input_change.value);
+    if (v_target.childNodes[0].nodeName == "THINK") {
+      v_target.childNodes[2].innerHTML = text;
+    }
+    else {
+      v_target.childNodes[1].innerHTML = text;
+    }
     changeTarget(3);
     showInfo("更改成功!");
   } catch (e) {
@@ -323,12 +322,12 @@ async function changeCollapse() {
     isCollapse.value = !isCollapse.value;
   }
 }
-
+const SCROLL_RANGE = 64;//捕获范围
 function nextLine() {
   if (!next_line) return;
   const val = getScrollValue();
   last_line = last_line ? last_line : val;
-  if (last_line > val) next_line = false;//如果用户不想自动下滑
+  if (last_line > val + SCROLL_RANGE) next_line = false;//如果用户不想自动下滑
   else last_line = val;
   if (next_line) gotoBottom();
 }
@@ -342,6 +341,11 @@ function key_init(vkey, mode = true) {
     ai.setParameters(v_params.value[0], v_params.value[1], v_params.value[2]);
     ai.setLimit(v_params.value[3]);
     ai.setCallBack(nextLine, pop_item);
+    ai.setUsageCallback((usage) => {
+        if(usage && usage.total_tokens) {
+            total_tokens.value = usage.total_tokens;
+        }
+    });
     window.ai = ai;//DEL
   } catch (e) {
     console.log(e);
@@ -400,7 +404,7 @@ onMounted(() => {
   isMobile.value = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(navigator.userAgent || navigator.vendor || window.opera);
   key_init(v_keys);
   submit = function () {
-    if (!v_keys || !input_key.value) {
+    if (!v_keys || (!input_key.value && !v_cs_key.value)) {
       showWarning("请设置密钥.");
       return;
     }
@@ -425,7 +429,7 @@ onMounted(() => {
       push_item(newelm_ai);
       let gt = new GenText(newelm_ai.childNodes[1].id);
       gt.setCallBack((o) => {
-        let html = marked.parse(o.text_node.innerHTML);
+        let html = mark(ai.history[ai.history.length - 1].parts[0].text);
         html = unescapeHTML(html.replace(/^\s*<p>|<\/p>\s*$/g, ''));
         o.text_node.innerHTML = html;
         if (next_line) gotoBottom();
@@ -435,6 +439,7 @@ onMounted(() => {
       });
       ai.setProxy(gt);
       v_abort.value = true;
+      gotoBottom();
       ai.postMessage(input_value.value);
       input_value.value = "";
     } catch (e) {
@@ -454,7 +459,7 @@ onMounted(() => {
   });
 });
 function clear(test = false) {
-  if (!v_keys || !input_key.value) {
+  if (!v_keys || (!input_key.value && !v_cs_key.value)) {
     showWarning("请设置密钥.");
     return;
   }
@@ -467,6 +472,7 @@ function clear(test = false) {
     if (!test) {
       showInfo("已清空消息.");
       is_clear = true;
+      total_tokens.value = 0;
     }
   } catch (e) {
     console.log(e);
@@ -475,7 +481,7 @@ function clear(test = false) {
 }
 async function resend() {
   try {
-    if (!v_keys || !input_key.value) {
+    if (!v_keys || (!input_key.value && !v_cs_key.value)) {
       showWarning("请设置密钥.");
       return;
     }
@@ -498,6 +504,7 @@ async function resend() {
         changeTarget(2);
       }
       input_value.value = message;
+      gotoBottom();
       submit();
       return;
     }
@@ -526,7 +533,7 @@ async function resend() {
     ai.setProxy(to_set);
     to_set.setCallBack((o) => {
       if (o.text_node && o.text_node.innerHTML) {
-        let html = marked.parse(o.text_node.innerHTML);
+        let html = mark(ai.history[ai.history.length - 1].parts[0].text);
         html = unescapeHTML(html.replace(/^\s*<p>|<\/p>\s*$/g, ''));
         o.text_node.innerHTML = html;
       }
@@ -537,6 +544,7 @@ async function resend() {
     });
     ai._proxy.clear();
     v_abort.value = true;
+    gotoBottom();
     ai.reSubmit(null, first_user);
   } catch (e) {
     console.log(e);
@@ -582,7 +590,7 @@ function unpackMessage(pak) {
     for (let i = 0; i < ai.history.length; ++i) {
       let refv = ai.history[i];
       let item = createTextBox(refv.role == "user" ? text_type[0] : text_type[1]);
-      let html = marked.parse(refv.parts[0].text);
+      let html = mark(refv.parts[0].text);
       html = unescapeHTML(html.replace(/^\s*<p>|<\/p>\s*$/g, ''));
       item.childNodes[1].innerHTML = html;
       push_item(item);
@@ -678,6 +686,7 @@ function deleteHistory(t) {
 }
 function setInterrupt() {
   v_abort_value.value = true;
+  if (ai) ai.abort();
 }
 </script>
 <template>
@@ -791,6 +800,10 @@ function setInterrupt() {
               <el-button id="save" style="width: 3%;" :disabled="b_lock || b_mlock" v-if="!b_mlock"
                 v-on:click="save_msg">💾</el-button>
               <span :style="{ opacity: isCollapse ? 1 : 0 }">
+                <span v-if="!b_mlock" 
+              style = "position: absolute;  top: 18px; font-size: 10px; color: #909399; background: #1e1e1e; padding: 2px 6px; border-radius: 4px;">
+            {{ total_tokens }}
+        </span>
                 <el-select v-model="select_model" placeholder="Select"
                   style="position: absolute;right: 5%; width: 200px" v-on:change="changeModel()" :disabled="b_mlock"
                   v-if="!b_mlock">
